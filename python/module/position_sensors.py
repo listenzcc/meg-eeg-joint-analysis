@@ -137,13 +137,13 @@ class JointData_PositionSensors(JointData):
         gs = axs[1, 0].get_gridspec()
         axs[1, 0].remove()
         axs[1, 1].remove()
-        ax = fig.add_subplot(gs[1:, 0:])
+        ax = fig.add_subplot(gs[1:2, 0:2])
         ax.set_title('Distance')
         sns.heatmap(self.distance_matrix, ax=ax)
 
         # --------------------
-        ax = axs[1][1]
-        ax.axis('off')
+        # ax = axs[1][1]
+        # ax.axis('off')
 
         fig.suptitle('Sensor positions')
         fig.tight_layout()
