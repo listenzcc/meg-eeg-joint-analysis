@@ -1,5 +1,5 @@
 """
-File: analysis.py
+File: locate_sensors.py
 Author: Chuncheng Zhang
 Date: 2024-03-27
 Copyright & Email: chuncheng.zhang@ia.ac.cn
@@ -84,36 +84,38 @@ def sensor_positions(epochs: mne.Epochs):
         columns=['ch_name', 'kind', 'uint', 'loc']
     )
     df['pos'] = df['loc'].map(lambda e: apply_trans(dev_head_t, e[:3]))
-    logger.debug(f'Found chs:\n{df}')
+    logger.debug(f'Found chs: {len(df)}')
     return df
 
 
-class JointData_PositionSensors(JointData):
+class JointData_SensorsPosition(JointData):
     meg_sensor_positions = None
     eeg_sensor_positions = None
     distance_matrix = None
 
-    def __init__(self, path: Path):
-        super().__init__(path)
+    def __init__(self, obj: dict):
+        super().__init__(obj)
         self.position_sensors()
-        pass
 
     def position_sensors(self):
         meg = sensor_positions(self.epochs_meg)
         eeg = sensor_positions(self.epochs_eeg)
 
+        # Compute the real-world distance between meg- and eeg-sensors
+        # It is a 35 x 273 float matrix in pd.DataFrame format
         m_pos = np.array(meg['pos'].to_list())
         e_pos = np.array(eeg['pos'].to_list())
         c = cdist(e_pos, m_pos)
         dm = pd.DataFrame(c, index=eeg['ch_name'], columns=meg['ch_name'])
-        logger.debug(f'Distance matrix:\n{dm}')
+        logger.debug(
+            f'Computed distance matrix: {len(dm)} rows, {len(dm.columns)} cols')
 
         self.meg_sensor_positions = meg
         self.eeg_sensor_positions = eeg
         self.distance_matrix = dm
 
     def plot_positions(self) -> plt.Figure:
-        fig, axs = plt.subplots(2, 2, figsize=(12, 12))
+        fig, axs = plt.subplots(2, 2, figsize=(8, 8))
 
         kwargs = dict(
             ch_groups='position',
@@ -147,6 +149,7 @@ class JointData_PositionSensors(JointData):
 
         fig.suptitle('Sensor positions')
         fig.tight_layout()
+        self.append_pdf_fig(fig)
         return fig
 
     def plot_positions_3d(self):
@@ -156,9 +159,8 @@ class JointData_PositionSensors(JointData):
         df['y'] = df['pos'].map(lambda e: e[1])
         df['z'] = df['pos'].map(lambda e: e[2])
         df['size'] = 1
-        fig = px.scatter_3d(df, x='x', y='y', z='z',
-                            size='size', size_max=10, color='kind')
-        return fig
+        return px.scatter_3d(df, x='x', y='y', z='z',
+                             size='size', size_max=10, color='kind')
 
 
 # %% ---- 2024-03-27 ------------------------

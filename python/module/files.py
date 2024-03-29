@@ -19,6 +19,7 @@ Functions:
 # %% ---- 2024-03-27 ------------------------
 # Requirements and constants
 import os
+import contextlib
 import pandas as pd
 
 from pathlib import Path
@@ -47,10 +48,12 @@ def _check_known_file(folder_full_path: str) -> bool:
     # logger.debug(f'Found known folder: {folder_full_path}')
 
     # Parse all
+    # ! The data table has the following columns
     return dict(
         subject_id=path.parent.name,
         session_id=name,
         session_type='noise' if name.startswith('Noise') else 'experiment',
+        experiment=None,  # noise, complex or simple
         path=path
     )
 
@@ -63,13 +66,13 @@ def _mark_experiments(raw_df: pd.DataFrame):
 
     # Group by session_type
     group = df.query('session_type=="experiment"').groupby('subject_id')
-    logger.debug(f'Found experiment sessions:\n{group.count()}')
+    logger.debug(f'Found experiment sessions: {len(group)}')
 
     # Mark the tail 8 sessions as the **complex**
     # and the other sessions as the **simple**
     # if the session_type is "noise", mark them as the **noise**
     df1 = group.tail(8)
-    logger.debug(f'Complex experiment sessions are:\n{df1.count()}')
+    logger.debug(f'Complex experiment sessions: {len(df1)}')
 
     df['experiment'] = df['session_type'].map(
         lambda e: 'simple' if e == 'experiment' else e)
@@ -81,12 +84,11 @@ def _mark_experiments(raw_df: pd.DataFrame):
 def search_all_files(path: Path = data_path):
     found = []
     for folder_full_path, _, _ in os.walk(path):
-        try:
+        with contextlib.suppress(AssertionError):
             found.append(_check_known_file(folder_full_path))
-        except AssertionError as e:
-            pass
     found = sorted(found, key=lambda e: e['session_id'])
     df = pd.DataFrame(found)
+    logger.debug(f'Found files: {len(df)}')
     return _mark_experiments(df)
 
 

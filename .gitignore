@@ -5,6 +5,10 @@
 deprecated
 log
 
+# Project
+cache
+pdf-pages
+
 # Python
 __pycache__
 .ipynb_checkpoints
