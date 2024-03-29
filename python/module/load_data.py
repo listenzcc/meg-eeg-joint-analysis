@@ -28,6 +28,7 @@ from datetime import datetime
 from matplotlib.backends.backend_pdf import PdfPages
 
 from . import logger
+from .match_montage import MontageMatcher, FIFF
 
 
 # %% ---- 2024-03-27 ------------------------
@@ -73,11 +74,12 @@ def _reset_eeg_montage(epochs):
 
     return epochs
 
+
 class MyCache(object):
     root = Path('./cache')
     path = None
 
-    def __init__(self, uid:str):
+    def __init__(self, uid: str):
         self.path = self.root.joinpath(uid)
 
     def get_path(self, subpath):
@@ -96,8 +98,9 @@ class JointData(object):
     raw = None
     events = None
     event_id = None
-    epochs_meg = None
-    epochs_eeg = None
+    epochs = None
+    # epochs_meg = None
+    # epochs_eeg = None
 
     experiment_events = {
         '1': 'Hand',  # '手',
@@ -113,6 +116,7 @@ class JointData(object):
         self.open_pdf()
         self.load_raw()
         self.add_empty_room_noise_proj()
+        self.fix_montage()
         self.get_epochs()
 
     def init_cache(self):
@@ -191,7 +195,6 @@ class JointData(object):
 
         logger.debug(f'Loaded raw: {path_array}, {raw}')
 
-
         return raw, events, event_id
 
     def add_empty_room_noise_proj(self):
@@ -206,19 +209,41 @@ class JointData(object):
         except Exception as err:
             logger.error(f'Invalid empty room noise file: {path}, {err}')
 
+    def fix_montage(self):
+        raw = self.raw
+
+        montage64 = mne.channels.make_standard_montage(montage64_name)
+
+        channels_in_order = [
+            e.strip()
+            for e in channels_in_order_5x7.split(',')
+        ]
+
+        mm = MontageMatcher(raw.get_montage(), montage64)
+        self.mm = mm
+
+        change_ch_name_map = {}
+        for ch_name, raw_ch_name, dig in zip(
+                channels_in_order,
+                [e for e in raw.ch_names if e.startswith('EEG')][:35],
+                [e for e in mm.montage.dig if e['kind'] == FIFF.FIFFV_POINT_EEG][:35], strict=True):
+
+            dig['r'] = mm.eeg_ch_table[ch_name]['dig']['r']
+
+            change_ch_name_map[raw_ch_name] = mm.eeg_ch_table[ch_name]['name']
+
+        raw.rename_channels(change_ch_name_map)
+        raw.set_montage(mm.standard_montage, on_missing='warn')
+        logger.debug(f'Changed ch_names {change_ch_name_map}')
+
+        self.eeg_ch_names = list(change_ch_name_map.values())
+
+        return raw
+
     def get_epochs(self):
         raw = self.raw
         events = self.events
         event_id = self.event_id
-
-
-        # --------------------
-        kwargs = dict(
-            tmin=-1,  # Starts from -1.0 seconds
-            tmax=4,  # Ends at 4.0 seconds
-            decim=20,  # Down-samples from 1200 Hz to 60 Hz
-            detrend=0,  # Remove DC
-        )
 
         # --------------------
         # Reject template
@@ -228,6 +253,32 @@ class JointData(object):
             eeg=40e-6,      # unit: V (EEG channels)
             eog=250e-6      # unit: V (EOG channels)
         )
+
+        unit_1ft = 1e-15  # Teslas
+        unit_1uv = 1e-6  # Volts
+        reject = dict(
+            mag=4000 * unit_1ft,
+            eeg=400 * unit_1uv
+        )
+
+        # --------------------
+        kwargs = dict(
+            tmin=-1,  # Starts from -1.0 seconds
+            tmax=4,  # Ends at 4.0 seconds
+            decim=100,  # 20,  # Down-samples from 1200 Hz to 60 Hz
+            detrend=0,  # Remove DC
+        )
+
+        epochs = mne.Epochs(raw, events, event_id,
+                            picks=['mag'], **kwargs)
+
+        kwargs.update(reject=reject)
+
+        epochs = mne.Epochs(raw, events, event_id,
+                            picks=epochs.ch_names + self.eeg_ch_names, **kwargs)
+        print(epochs)
+        self.epochs = epochs
+        return
 
         # --------------------
         # MEG

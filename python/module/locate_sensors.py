@@ -98,8 +98,10 @@ class JointData_SensorsPosition(JointData):
         self.position_sensors()
 
     def position_sensors(self):
-        meg = sensor_positions(self.epochs_meg)
-        eeg = sensor_positions(self.epochs_eeg)
+        # ! Suppose there 272 meg sensors and 35 eeg sensors
+        total = sensor_positions(self.epochs)
+        meg = total[total['ch_name'].map(lambda e: e not in self.eeg_ch_names)]
+        eeg = total[total['ch_name'].map(lambda e: e in self.eeg_ch_names)]
 
         # Compute the real-world distance between meg- and eeg-sensors
         # It is a 35 x 273 float matrix in pd.DataFrame format
@@ -126,13 +128,13 @@ class JointData_SensorsPosition(JointData):
         # --------------------
         ax = axs[0, 0]
         ax.set_title('MEG sensors')
-        mne.viz.plot_sensors(self.epochs_meg.info, title='MEG',
+        mne.viz.plot_sensors(self.epochs.info, title='MEG', ch_type='mag',
                              axes=ax, show_names=False, **kwargs)
 
         # --------------------
         ax = axs[0, 1]
         ax.set_title('EEG sensors')
-        mne.viz.plot_sensors(self.epochs_eeg.info, title='EEG',
+        mne.viz.plot_sensors(self.epochs.info, title='EEG', ch_type='eeg',
                              axes=ax, show_names=True, **kwargs)
 
         # --------------------
