@@ -35,9 +35,7 @@ from .locate_sensors import JointData_SensorsPosition
 # %% ---- 2024-03-28 ------------------------
 # Function and class
 class JointData_SensorsPosition_Epochs(JointData_SensorsPosition):
-    evoked_meg = {}
-    evoked_eeg = {}
-    evoked_cached = {}
+    cached_evoked = {}
 
     def __init__(self, obj: dict):
         super().__init__(obj)
@@ -51,7 +49,7 @@ class JointData_SensorsPosition_Epochs(JointData_SensorsPosition):
     def get_evoked(self, event: str):
         # --------------------
         # Requested evoked exists, just use it
-        evoked = self.evoked_cached.get(event)
+        evoked = self.cached_evoked.get(event)
         if evoked is not None:
             return evoked
 
@@ -62,40 +60,15 @@ class JointData_SensorsPosition_Epochs(JointData_SensorsPosition):
         p = self.cache.get_path(f'evoked-{event}-ave.fif')
         try:
             evoked = mne.Evoked(p)
-            logger.debug(f'Loaded meg evoked from {p}')
+            logger.debug(f'Loaded evoked from {p}')
         except Exception as err:
-            logger.warning(f'Invalid cached file: {p}, {err}')
+            logger.warning(f'Failed loading cached evoked: {err}: {p}')
             evoked = self.epochs[event].average()
-            evoked.apply_proj()
-            evoked.save(p, overwrite=True)
-            logger.debug(f'Saved evoked: {p}')
             logger.debug(f'Averaged evoked: {evoked}')
-        self.evoked_cached[event] = evoked.pick(picks='all', exclude='bads')
-        return evoked
-
-    def get_eeg_evoked(self, event: str):
-        # --------------------
-        # Requested evoked exists, just use it
-        evoked = self.evoked_eeg.get(event)
-        if evoked is not None:
-            return evoked
-
-        # --------------------
-        # Requested evoked does not exist, make it
-        # Try to read it from cached file,
-        # Or compute it
-        p = self.cache.get_path(f'eeg-evoked-{event}-ave.fif')
-        try:
-            evoked = mne.Evoked(p)
-            logger.debug(f'Loaded eeg evoked from {p}')
-        except Exception as err:
-            logger.warning(f'Invalid cached file: {p}, {err}')
-            evoked = self.epochs_eeg[event].average()
             evoked.apply_proj()
             evoked.save(p, overwrite=True)
             logger.debug(f'Saved evoked: {p}')
-            logger.debug(f'Averaged meg evoked: {evoked}')
-        self.evoked_eeg[event] = evoked.pick(picks='eeg', exclude='bads')
+        self.cached_evoked[event] = evoked.pick(picks='all', exclude='bads')
         return evoked
 
     def compute_meg_eeg_signal_distance(self):

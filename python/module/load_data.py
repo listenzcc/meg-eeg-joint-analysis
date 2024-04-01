@@ -99,8 +99,9 @@ class JointData(object):
     events = None
     event_id = None
     epochs = None
-    # epochs_meg = None
-    # epochs_eeg = None
+
+    eeg_ch_names = None
+    meg_ch_names = None
 
     experiment_events = {
         '1': 'Hand',  # '手',
@@ -240,70 +241,80 @@ class JointData(object):
 
         return raw
 
-    def get_epochs(self):
+    def _epochs_from_raw(self):
+        # --------------------
+        # Necessary components
         raw = self.raw
         events = self.events
         event_id = self.event_id
 
         # --------------------
         # Reject template
-        reject = dict(
+        reject_example = dict(
             grad=4000e-13,  # unit: T / m (gradiometers)
             mag=4e-12,      # unit: T (magnetometers)
             eeg=40e-6,      # unit: V (EEG channels)
             eog=250e-6      # unit: V (EOG channels)
         )
 
+        # --------------------
+        # MEG reject
         unit_1ft = 1e-15  # Teslas
+        # EEG reject
         unit_1uv = 1e-6  # Volts
         reject = dict(
             mag=4000 * unit_1ft,
             eeg=400 * unit_1uv
         )
 
-        # --------------------
         kwargs = dict(
             tmin=-1,  # Starts from -1.0 seconds
             tmax=4,  # Ends at 4.0 seconds
-            decim=100,  # 20,  # Down-samples from 1200 Hz to 60 Hz
+            decim=20,  # 20,  # Down-samples from 1200 Hz to 60 Hz
             detrend=0,  # Remove DC
         )
 
         epochs = mne.Epochs(raw, events, event_id,
                             picks=['mag'], **kwargs)
+        self.meg_ch_names = epochs.ch_names.copy()
 
         kwargs.update(reject=reject)
 
         epochs = mne.Epochs(raw, events, event_id,
-                            picks=epochs.ch_names + self.eeg_ch_names, **kwargs)
-        print(epochs)
+                            picks=self.meg_ch_names + self.eeg_ch_names, **kwargs)
+        epochs.apply_proj()
         self.epochs = epochs
-        return
+        return epochs
 
-        # --------------------
-        # MEG
-        unit_1ft = 1e-15  # Teslas
-        epochs_meg = mne.Epochs(raw, events, event_id, reject={
-                                'mag': 4000 * unit_1ft}, picks='mag', **kwargs)
+    def get_epochs(self):
+        p = self.cache.get_path('epochs-epo.fif')
+        try:
+            # self.epochs = mne.Epochs(p)
+            self.epochs = mne.read_epochs(p)
+            self._separate_ch_names()
+            logger.debug(f'Loaded epochs from {p}')
+        except Exception as err:
+            logger.warning(f'Failed loading cached epochs: {err}: {p}')
+            epochs = self._epochs_from_raw()
+            epochs.save(p, overwrite=True)
+            self.epochs = epochs
 
-        # --------------------
-        # EEG
-        unit_1uv = 1e-6  # Volts
-        picks = [e for e in raw.ch_names if e.startswith('EEG')][:35]
-        epochs_eeg = mne.Epochs(raw, events, event_id, reject={
-                                'eeg': 400 * unit_1uv}, picks=picks, **kwargs)
-        # The empty-room noise does not contain the EEG components
-        epochs_eeg.del_proj(idx='all')
+        logger.debug(f'Got epochs: {self.epochs}')
+        return self.epochs
 
-        _reset_eeg_montage(epochs_eeg)
+    def _separate_ch_names(self):
+        meg_ch_names = []
+        eeg_ch_names = []
+        for (ch_name, ch) in zip(self.epochs.ch_names, self.epochs.info['chs']):
+            if ch['kind'] == FIFF.FIFFV_MEG_CH:
+                meg_ch_names.append(ch_name)
+            if ch['kind'] == FIFF.FIFFV_EEG_CH:
+                eeg_ch_names.append(ch_name)
+        self.meg_ch_names = meg_ch_names
+        self.eeg_ch_names = eeg_ch_names
+        logger.debug(f'Separated meg_ch_names: {meg_ch_names}')
+        logger.debug(f'Separated eeg_ch_names: {eeg_ch_names}')
 
-        self.epochs_meg = epochs_meg
-        self.epochs_eeg = epochs_eeg
-
-        logger.debug(f'Got epochs_meg: {epochs_meg}'.replace('\n', ' '))
-        logger.debug(f'Got epochs_eeg: {epochs_eeg}'.replace('\n', ' '))
-
-        return epochs_meg, epochs_eeg
 
 
 # %% ---- 2024-03-27 ------------------------
