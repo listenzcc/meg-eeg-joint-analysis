@@ -28,6 +28,7 @@ from datetime import datetime
 from matplotlib.backends.backend_pdf import PdfPages
 
 from . import logger
+from .match_montage import MontageMatcher, FIFF
 
 
 # %% ---- 2024-03-27 ------------------------
@@ -73,11 +74,12 @@ def _reset_eeg_montage(epochs):
 
     return epochs
 
+
 class MyCache(object):
     root = Path('./cache')
     path = None
 
-    def __init__(self, uid:str):
+    def __init__(self, uid: str):
         self.path = self.root.joinpath(uid)
 
     def get_path(self, subpath):
@@ -96,8 +98,10 @@ class JointData(object):
     raw = None
     events = None
     event_id = None
-    epochs_meg = None
-    epochs_eeg = None
+    epochs = None
+
+    eeg_ch_names = None
+    meg_ch_names = None
 
     experiment_events = {
         '1': 'Hand',  # '手',
@@ -113,6 +117,7 @@ class JointData(object):
         self.open_pdf()
         self.load_raw()
         self.add_empty_room_noise_proj()
+        self.fix_montage()
         self.get_epochs()
 
     def init_cache(self):
@@ -191,7 +196,6 @@ class JointData(object):
 
         logger.debug(f'Loaded raw: {path_array}, {raw}')
 
-
         return raw, events, event_id
 
     def add_empty_room_noise_proj(self):
@@ -206,23 +210,47 @@ class JointData(object):
         except Exception as err:
             logger.error(f'Invalid empty room noise file: {path}, {err}')
 
-    def get_epochs(self):
+    def fix_montage(self):
+        raw = self.raw
+
+        montage64 = mne.channels.make_standard_montage(montage64_name)
+
+        channels_in_order = [
+            e.strip()
+            for e in channels_in_order_5x7.split(',')
+        ]
+
+        mm = MontageMatcher(raw.get_montage(), montage64)
+        self.mm = mm
+
+        change_ch_name_map = {}
+        for ch_name, raw_ch_name, dig in zip(
+                channels_in_order,
+                [e for e in raw.ch_names if e.startswith('EEG')][:35],
+                [e for e in mm.montage.dig if e['kind'] == FIFF.FIFFV_POINT_EEG][:35], strict=True):
+
+            dig['r'] = mm.eeg_ch_table[ch_name]['dig']['r']
+
+            change_ch_name_map[raw_ch_name] = mm.eeg_ch_table[ch_name]['name']
+
+        raw.rename_channels(change_ch_name_map)
+        raw.set_montage(mm.standard_montage, on_missing='warn')
+        logger.debug(f'Changed ch_names {change_ch_name_map}')
+
+        self.eeg_ch_names = list(change_ch_name_map.values())
+
+        return raw
+
+    def _epochs_from_raw(self):
+        # --------------------
+        # Necessary components
         raw = self.raw
         events = self.events
         event_id = self.event_id
 
-
-        # --------------------
-        kwargs = dict(
-            tmin=-1,  # Starts from -1.0 seconds
-            tmax=4,  # Ends at 4.0 seconds
-            decim=20,  # Down-samples from 1200 Hz to 60 Hz
-            detrend=0,  # Remove DC
-        )
-
         # --------------------
         # Reject template
-        reject = dict(
+        reject_example = dict(
             grad=4000e-13,  # unit: T / m (gradiometers)
             mag=4e-12,      # unit: T (magnetometers)
             eeg=40e-6,      # unit: V (EEG channels)
@@ -230,29 +258,63 @@ class JointData(object):
         )
 
         # --------------------
-        # MEG
+        # MEG reject
         unit_1ft = 1e-15  # Teslas
-        epochs_meg = mne.Epochs(raw, events, event_id, reject={
-                                'mag': 4000 * unit_1ft}, picks='mag', **kwargs)
-
-        # --------------------
-        # EEG
+        # EEG reject
         unit_1uv = 1e-6  # Volts
-        picks = [e for e in raw.ch_names if e.startswith('EEG')][:35]
-        epochs_eeg = mne.Epochs(raw, events, event_id, reject={
-                                'eeg': 400 * unit_1uv}, picks=picks, **kwargs)
-        # The empty-room noise does not contain the EEG components
-        epochs_eeg.del_proj(idx='all')
+        reject = dict(
+            mag=4000 * unit_1ft,
+            eeg=400 * unit_1uv
+        )
 
-        _reset_eeg_montage(epochs_eeg)
+        kwargs = dict(
+            tmin=-1,  # Starts from -1.0 seconds
+            tmax=4,  # Ends at 4.0 seconds
+            decim=20,  # 20,  # Down-samples from 1200 Hz to 60 Hz
+            detrend=0,  # Remove DC
+        )
 
-        self.epochs_meg = epochs_meg
-        self.epochs_eeg = epochs_eeg
+        epochs = mne.Epochs(raw, events, event_id,
+                            picks=['mag'], **kwargs)
+        self.meg_ch_names = epochs.ch_names.copy()
 
-        logger.debug(f'Got epochs_meg: {epochs_meg}'.replace('\n', ' '))
-        logger.debug(f'Got epochs_eeg: {epochs_eeg}'.replace('\n', ' '))
+        kwargs.update(reject=reject)
 
-        return epochs_meg, epochs_eeg
+        epochs = mne.Epochs(raw, events, event_id,
+                            picks=self.meg_ch_names + self.eeg_ch_names, **kwargs)
+        epochs.apply_proj()
+        self.epochs = epochs
+        return epochs
+
+    def get_epochs(self):
+        p = self.cache.get_path('epochs-epo.fif')
+        try:
+            # self.epochs = mne.Epochs(p)
+            self.epochs = mne.read_epochs(p)
+            self._separate_ch_names()
+            logger.debug(f'Loaded epochs from {p}')
+        except Exception as err:
+            logger.warning(f'Failed loading cached epochs: {err}: {p}')
+            epochs = self._epochs_from_raw()
+            epochs.save(p, overwrite=True)
+            self.epochs = epochs
+
+        logger.debug(f'Got epochs: {self.epochs}')
+        return self.epochs
+
+    def _separate_ch_names(self):
+        meg_ch_names = []
+        eeg_ch_names = []
+        for (ch_name, ch) in zip(self.epochs.ch_names, self.epochs.info['chs']):
+            if ch['kind'] == FIFF.FIFFV_MEG_CH:
+                meg_ch_names.append(ch_name)
+            if ch['kind'] == FIFF.FIFFV_EEG_CH:
+                eeg_ch_names.append(ch_name)
+        self.meg_ch_names = meg_ch_names
+        self.eeg_ch_names = eeg_ch_names
+        logger.debug(f'Separated meg_ch_names: {meg_ch_names}')
+        logger.debug(f'Separated eeg_ch_names: {eeg_ch_names}')
+
 
 
 # %% ---- 2024-03-27 ------------------------

@@ -18,11 +18,13 @@ Functions:
 
 # %% ---- 2024-03-27 ------------------------
 # Requirements and constants
+import numpy as np
 import mne
 import random
 import matplotlib.pyplot as plt
 
 from module import logger
+from module.constants import FIFF
 from module.files import search_all_files
 from module.load_data import JointData
 from module.locate_sensors import JointData_SensorsPosition
@@ -31,7 +33,7 @@ from module.analysis_epochs import JointData_SensorsPosition_Epochs
 
 # %% ---- 2024-03-27 ------------------------
 # Function and class
-def mk_inputs(subject_id:str=None):
+def mk_inputs(subject_id: str = None):
 
     # --------------------
     # Search files
@@ -73,82 +75,23 @@ if __name__ == '__main__':
     inputs = mk_inputs()
     logger.debug(f'Using inputs: {inputs}')
 
+    # jd = JointData(inputs)
     jd = JointData_SensorsPosition_Epochs(inputs)
 
-    # jd.plot_positions()
+    jd.plot_positions()
 
-    # jd.plot_evoked()
+    jd.plot_evoked()
 
-    # jd.compute_meg_eeg_signal_distance()
+    jd.compute_meg_eeg_signal_distance()
 
     jd.close_pdf()
 
+    # fig = jd.plot_positions_3d()
+    # fig.show()
+
     print('Done.')
 
-# %%
-# jd.epochs_eeg, jd.epochs_meg
 
-montage = jd.epochs_eeg.get_montage()
-type(montage)
-montage.get_positions()
-montage.dig
-
-# %%
-montage = jd.raw.get_montage()
-print(montage)
-print(montage.get_positions())
-
-# %%
-import numpy as np
-montage = jd.raw.get_montage()
-for e in montage.dig:
-    print(e)
-    print(e['r'])
-    print(type(e['r']))
-    e['r'] = np.array([1.0, 1.0, 1.0])
-
-for e in montage.dig:
-    print(e)
-    # print(e['r'])
-
-# %%
-mne.channels.montage.DigMontage
-# %%
-
-# %% ---- 2024-03-27 ------------------------
-# Pending
-# import numpy as np
-# import seaborn as sns
-# import matplotlib.pyplot as plt
-
-# for event in jd.event_id:
-#     _experiment = f'{event}-{jd.experiment_events[event]}'
-#     print(_experiment)
-#     meg = jd.get_meg_evoked(event).data
-#     eeg = jd.get_eeg_evoked(event).data
-#     print(meg.shape, eeg.shape)
-#     coef = np.corrcoef(meg, eeg)
-#     print(coef.shape)
-
-#     dm = jd.distance_matrix.copy()
-#     df = jd.distance_matrix.copy()
-
-#     fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-#     sns.heatmap(coef, ax=ax, cmap='RdBu').set_title(f'Corr-{_experiment}')
-
-#     fig, axs = plt.subplots(2, 1, figsize=(8, 8))
-#     arr = coef[-len(eeg):, :len(meg)]
-#     df.loc[:] = arr
-#     sns.heatmap(dm, ax=axs[0], cmap='cividis').set_title(f'Sensor-dist-{_experiment}')
-#     sns.heatmap(df, ax=axs[1], cmap='RdBu').set_title(f'Signal-corr-{_experiment}')
-#     plt.tight_layout()
-#     plt.show()
-
-# print('Done.')
-
-# %%
-
-# %%
 # %% ---- 2024-03-27 ------------------------
 # Pending
 
